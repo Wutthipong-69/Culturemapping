@@ -308,7 +308,7 @@
     }
 
     // โหลดไฟล์ contourpn.kml
-    const kmlLayer = omnivore.kml('../contourpn.kml')
+    const kmlLayer = omnivore.kml('contourpn.kml')
         .on('ready', function() {
             map.fitBounds(kmlLayer.getBounds());
 
