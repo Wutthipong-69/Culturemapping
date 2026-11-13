@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แผนที่เส้นชั้นความสูง (Contour Map)</title>
+    
+    <!-- 1. Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Sarabun', sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        /* สไตล์สำหรับกล่อง Legend */
+        .legend {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            line-height: 1.6;
+            color: #333;
+            max-height: 350px;
+            overflow-y: auto;
+            min-width: 240px;
+        }
+        .legend h4 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        .legend-svg {
+            width: 50px;
+            height: 16px;
+            margin-right: 10px;
+            flex-shrink: 0;
+            border: 1px solid #eee;
+            border-radius: 2px;
+        }
+        /* สไตล์ตัวเลขบนเส้นชั้นความสูง (วางกึ่งกลางแนวเส้น ขนาดเริ่มต้น 8pt) */
+        .contour-label {
+            font-size: 8pt;
+            font-weight: bold;
+            fill: #222;
+            dominant-baseline: central; /* จัดกึ่งกลางแนวตั้งให้ทับพอดีกับเส้น */
+            paint-order: stroke;
+            stroke: #ffffff;
+            stroke-width: 3px;          /* ขอบสีขาวตัดเส้นชั้นความสูงด้านหลังให้อ่านตัวเลขชัดเจน */
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            transition: font-size 0.2s ease;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- 2. Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- 3. Leaflet Omnivore (สำหรับอ่านไฟล์ KML) -->
+<script src="https://api.tiles.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js"></script>
+<!-- 4. Leaflet Pattern (สำหรับลวดลายเส้น) -->
+<script src="https://teastman.github.io/Leaflet.pattern/leaflet.pattern.js"></script>
+<!-- 5. Leaflet TextPath (สำหรับตัวอักษรวิ่งตามเส้น) -->
+<script src="https://cdn.jsdelivr.net/npm/leaflet-textpath@1.2.3/leaflet.textpath.min.js"></script>
+
+<script>
+    // 1. กำหนดแผนที่ฐาน OpenStreetMap
+    const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    // 2. กำหนดแผนที่ฐาน OpenTopoMap
+    const openTopoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        maxZoom: 17,
+        attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
+    });
+
+    const map = L.map('map', {
+        center: [6.868, 101.250],
+        zoom: 12,
+        layers: [osmLayer]
+    });
+
+    const baseMaps = {
+        "OpenStreetMap": osmLayer,
+        "OpenTopoMap (ภูมิประเทศ)": openTopoLayer
+    };
+    L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
+
+    // การตั้งค่าสไตล์เฉพาะสำหรับ LU_CODE ที่กำหนด (1 และ 2)
+    const predefinedStyles = {
+           '1': { color: '#9E4533', weight: 2, patternType: 'solid', angle: 0, dashArray: null },
+        '2': { color: '#E86D54', weight: 1, patternType: 'solid', angle: 0, dashArray: null }
+    };
+
+    // ชุดสีสำรอง กรณีพบ LU_CODE อื่นๆ นอกเหนือจาก 1 และ 2
+    const fallbackPalette = ['#3cb44b', '#4363d8', '#911eb4', '#469990', '#9A6324'];
+    let fallbackIndex = 0;
+
+    const styleRegistry = {};
+    const contourLayers = []; // เก็บรายการ layer สำหรับอัปเดตตัวอักษรเมื่อซูม
+
+    // ฟังก์ชันสร้างหรือดึงค่า Style และ Leaflet.Pattern ตามค่า LU_CODE
+    function getStyleForLU(luCode, luDes) {
+        const code = (luCode !== null && luCode !== undefined) ? String(luCode).trim() : 'UNKNOWN';
+        const desc = luDes || 'ไม่ระบุประเภท';
+
+        if (!styleRegistry[code]) {
+            let config;
+            if (predefinedStyles[code]) {
+                config = predefinedStyles[code];
+            } else {
+                const color = fallbackPalette[fallbackIndex % fallbackPalette.length];
+                fallbackIndex++;
+                config = { color: color, weight: 2, patternType: 'dotted', angle: 90, dashArray: '10, 4, 2, 4' };
+            }
+
+            // สร้าง L.StripePattern ตามคุณสมบัติของแต่ละประเภท
+            let stripePattern;
+            if (config.patternType === 'solid') {
+                stripePattern = new L.StripePattern({
+                    weight: config.weight,
+                    spaceWeight: 0,
+                    color: config.color,
+                    opacity: 1,
+                    angle: config.angle
+                });
+            } else {
+                stripePattern = new L.StripePattern({
+                    weight: config.weight,
+                    spaceWeight: 3,
+                    color: config.color,
+                    spaceColor: '#ffffff',
+                    spaceOpacity: 0.3,
+                    opacity: 1,
+                    angle: config.angle
+                });
+            }
+
+            // ลงทะเบียน Pattern ลงในแผนที่ (ข้อบังคับของ leaflet.pattern)
+            stripePattern.addTo(map);
+
+            styleRegistry[code] = {
+                code: code,
+                desc: desc,
+                color: config.color,
+                weight: config.weight,
+                pattern: stripePattern,
+                patternType: config.patternType,
+                angle: config.angle,
+                dashArray: config.dashArray
+            };
+        }
+        return styleRegistry[code];
+    }
+
+    // ฟังก์ชันดึงค่า Property (รองรับทั้ง Property ตรงๆ และตาราง HTML ใน description)
+    function getProperty(props, key) {
+        if (!props) return null;
+        if (props[key] !== undefined && props[key] !== null) return props[key];
+        
+        const lowerKey = key.toLowerCase();
+        for (let k in props) {
+            if (k.toLowerCase() === lowerKey) return props[k];
+        }
+
+        if (props.description && typeof props.description === 'string') {
+            const regex = new RegExp(`<td>\\s*${key}\\s*<\\/td>\\s*<td>\\s*([^<]+)\\s*<\\/td>`, 'i');
+            const match = props.description.match(regex);
+            if (match && match[1]) {
+                return match[1].trim();
+            }
+        }
+        return null;
+    }
+
+    // ฟังก์ชันคำนวณขนาดตัวอักษร (หน่วย pt) ตามระดับการ Zoom (อ้างอิงฐาน 8pt)
+    function getZoomFontMetrics(zoom) {
+        if (zoom <= 10) return { fontSizePt: 6.5 };
+        if (zoom === 11) return { fontSizePt: 7 };
+        if (zoom === 12) return { fontSizePt: 7.5 };
+        if (zoom === 13) return { fontSizePt: 8 };
+        if (zoom === 14) return { fontSizePt: 8.5 };
+        if (zoom === 15) return { fontSizePt: 9 };
+        return { fontSizePt: 10 }; // ซูมใกล้ (16+)
+    }
+
+    // ฟังก์ชันคำนวณจำนวนช่องว่างเพื่อให้ข้อความห่างกัน 2,000 - 3,000 เมตรตามมาตราส่วนจริง
+    function buildSpacedElevationText(elevText, zoom, lat, fontSizePt) {
+        // กำหนดระยะห่างเป้าหมายบนพื้นที่จริงที่ 2,500 เมตร (กึ่งกลางของ 2,000 - 3,000 ม.)
+        const targetDistanceMeters = 3500;
+        
+        // คำนวณมาตราส่วน เมตรต่อพิกเซล ณ ละติจูดและระดับซูมปัจจุบัน
+        const metersPerPixel = (156543.03392 * Math.cos(lat * Math.PI / 180)) / Math.pow(2, zoom);
+        
+        // แปลงระยะ 2,500 เมตร เป็นจำนวนพิกเซลบนหน้าจอ
+        const targetSpacingPixels = targetDistanceMeters / metersPerPixel;
+        
+        // ความกว้างโดยประมาณของตัวอักษรช่องว่าง (Space) ใน SVG
+        const fontSizePx = fontSizePt * 1.333;
+        const singleSpaceWidthPx = Math.max(fontSizePx * 0.35, 3);
+        
+        // คำนวณจำนวนช่องว่างที่ต้องเติม
+        const spaceCount = Math.min(Math.max(Math.round(targetSpacingPixels / singleSpaceWidthPx), 20), 600);
+        
+        // เว้นวรรคหน้า-หลังตัวเลขเล็กน้อย เพื่อไม่ให้เส้นชั้นความสูงชิดตัวเลขจนเกินไป
+        const spacer = '\u00A0'.repeat(spaceCount);
+        return `\u00A0${elevText}\u00A0${spacer}`;
+    }
+
+    // ฟังก์ชันอัปเดตตัวเลขบนเส้นชั้นความสูงให้วางบนเส้นสัมพันธ์กับแนวโค้งของเส้น
+    function updateContourLabels() {
+        const currentZoom = map.getZoom();
+        const currentLat = map.getCenter().lat;
+        const metrics = getZoomFontMetrics(currentZoom);
+
+        contourLayers.forEach(item => {
+            // ล้างข้อความเดิมก่อนวาดใหม่
+            item.layer.setText(null);
+
+            if (item.elev !== null && item.elev !== '') {
+                const formattedText = buildSpacedElevationText(
+                    String(item.elev).trim(), 
+                    currentZoom, 
+                    currentLat, 
+                    metrics.fontSizePt
+                );
+
+                item.layer.setText(formattedText, {
+                    repeat: true,        // แสดงซ้ำกระจายเป็นระยะตามความยาวเส้น (ทุกๆ ~2,500 ม.)
+                    center: false,       // กระจายตัวตามระยะห่างที่กำหนด
+                    offset: 0,           // offset = 0 เพื่อวางป้ายตัวเลขลงบนแนวเส้นพอดี (In-line)
+                    orientation: 'flip', // ปรับทิศทางตัวเลขอัตโนมัติตามแนวโค้งของเส้นและไม่ให้กลับหัว
+                    attributes: {
+                        class: 'contour-label',
+                        dy: '0.32em',    // ปรับชดเชยแนวดิ่งให้กึ่งกลางตัวเลขทับอยู่บนเส้นชั้นความสูงพอดีในทุกเบราว์เซอร์
+                        style: `font-size: ${metrics.fontSizePt}pt;`
+                    }
+                });
+            }
+        });
+    }
+
+    // ฟังก์ชันจัดการแต่ละ Layer (รองรับทั้ง Polyline เดี่ยว และ MultiGeometry ที่ซ้อนอยู่)
+    function processContourLayer(layer) {
+        if (layer instanceof L.LayerGroup) {
+            layer.eachLayer(function(subLayer) {
+                if (!subLayer.feature && layer.feature) {
+                    subLayer.feature = layer.feature;
+                }
+                processContourLayer(subLayer);
+            });
+            return;
+        }
+
+        if (layer instanceof L.Polyline) {
+            const props = layer.feature ? layer.feature.properties : {};
+            
+            // แปลงค่า LU_CODE ให้เป็นจำนวนเต็ม ("1" หรือ "2") เผื่อในไฟล์เก็บเป็นทศนิยม เช่น "1.0"
+            let rawLuCode = getProperty(props, 'LU_CODE');
+            if (rawLuCode !== null && rawLuCode !== '' && !isNaN(rawLuCode)) {
+                rawLuCode = String(Math.round(Number(rawLuCode)));
+            }
+
+            const luDesTh = getProperty(props, 'LU_DES_TH');
+            const tpElev = getProperty(props, 'TP_ELEV');
+
+            const styleInfo = getStyleForLU(rawLuCode, luDesTh);
+
+            // กำหนดสไตล์ให้เส้น Polyline (ความหนา 2px และสีตาม LU_CODE)
+            layer.setStyle({
+                color: styleInfo.color,
+                weight: styleInfo.weight,
+                opacity: 1,
+                dashArray: styleInfo.dashArray,
+                fillPattern: styleInfo.pattern
+            });
+
+            // เก็บข้อมูล layer และค่าความสูงไว้สำหรับอัปเดตตามระดับ Zoom
+            contourLayers.push({
+                layer: layer,
+                elev: tpElev
+            });
+
+            layer.bindPopup(`
+                <strong>รหัสประเภท (LU_CODE):</strong> ${styleInfo.code}<br>
+                <strong>คำอธิบาย (LU_DES_TH):</strong> ${styleInfo.desc}<br>
+                <strong>ความสูง (TP_ELEV):</strong> ${tpElev || '-'} เมตร
+            `);
+        }
+    }
+
+    // โหลดไฟล์ contourpn.kml
+    const kmlLayer = omnivore.kml('../contourpn.kml')
+        .on('ready', function() {
+            map.fitBounds(kmlLayer.getBounds());
+
+            // วนลูปจัดการทุกเส้น (รวมถึง MultiGeometry ที่ซ้อนอยู่)
+            kmlLayer.eachLayer(processContourLayer);
+
+            // แสดงตัวเลขบนเส้นครั้งแรกและสร้างกล่อง Legend
+            updateContourLabels();
+            createLegend();
+        })
+        .on('error', function(err) {
+            console.error('เกิดข้อผิดพลาดในการโหลดไฟล์ KML:', err);
+            alert('ไม่สามารถโหลดไฟล์ contourpn.kml ได้ กรุณาตรวจสอบตำแหน่งไฟล์หรือรันผ่าน Web Server');
+        })
+        .addTo(map);
+
+    // จับเหตุการณ์เมื่อผู้ใช้ย่อ-ขยายแผนที่ (Zoom) เพื่อปรับขนาดตัวเลขและระยะห่าง 2,000-3,000 ม.
+    map.on('zoomend', updateContourLabels);
+
+    // ฟังก์ชันสร้างกล่อง Legend โดยจำลอง Pattern ให้ตรงกับ leaflet.pattern
+    function createLegend() {
+        const legend = L.control({ position: 'bottomright' });
+
+        legend.onAdd = function() {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.innerHTML = '<h4>คำอธิบายสัญลักษณ์ (LU_CODE)</h4>';
+
+            // เรียงลำดับตามรหัส LU_CODE (1, 2, ...)
+            const sortedItems = Object.values(styleRegistry).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+            sortedItems.forEach(item => {
+                const patternId = `leaflet-pattern-legend-${item.code}`;
+                const dashAttr = item.dashArray ? `stroke-dasharray="${item.dashArray}"` : '';
+                
+                // ดึงค่าจาก L.StripePattern มาสร้าง SVG Pattern Definition ให้ตรงกัน
+                const pWeight = item.pattern.options.weight || 2;
+                const pSpace = item.pattern.options.spaceWeight || 0;
+                const totalStep = pWeight + (pSpace > 0 ? pSpace : 2);
+                const pAngle = item.pattern.options.angle || 0;
+
+                div.innerHTML += `
+                    <div class="legend-item">
+                        <svg class="legend-svg" viewBox="0 0 50 16">
+                            <defs>
+                                <pattern id="${patternId}" width="${totalStep}" height="${totalStep}" 
+                                         patternUnits="userSpaceOnUse" patternTransform="rotate(${pAngle})">
+                                    <line x1="0" y1="0" x2="0" y2="${totalStep}" 
+                                          stroke="${item.color}" stroke-width="${pWeight}" />
+                                </pattern>
+                            </defs>
+                            <!-- แสดงเส้นตรงและลวดลาย pattern ที่ตรงกับบนแผนที่ -->
+                            <line x1="2" y1="8" x2="48" y2="8" 
+                                  stroke="${item.patternType === 'solid' ? item.color : `url(#${patternId})`}" 
+                                  stroke-width="${item.weight + 1}" 
+                                  ${dashAttr} />
+                        </svg>
+                        <span><strong>${item.code}</strong>: ${item.desc}</span>
+                    </div>
+                `;
+            });
+
+            return div;
+        };
+
+        legend.addTo(map);
+    }
+</script>
+
+</body>
+</html>
