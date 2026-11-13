@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบแสดงผลข้อมูลเชิงพื้นที่ (GeoJSON Viewer)</title>
+    
+    <!-- โหลด Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Sarabun', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        /* แถบควบคุมด้านบนสำหรับอัปโหลดไฟล์ */
+        #topbar {
+            background-color: #003c71;
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+        #topbar h2 {
+            margin: 0;
+            font-size: 1.2rem;
+        }
+        .file-upload-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+        input[type="file"] {
+            color: white;
+            font-size: 0.9rem;
+        }
+        /* พื้นที่แผนที่ */
+        #map {
+            flex-grow: 1;
+            width: 100%;
+        }
+        /* สไตล์สำหรับ Marker ทรงหยดน้ำ */
+        .custom-teardrop-marker {
+            background: transparent;
+            border: none;
+        }
+        /* กล่องคำอธิบายสัญลักษณ์ (Legend) */
+        .legend {
+            background: white;
+            padding: 12px 15px;
+            border-radius: 6px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            line-height: 1.8;
+            color: #333;
+            font-size: 0.9rem;
+        }
+        .legend h4 {
+            margin: 0 0 8px 0;
+            font-size: 0.95rem;
+            color: #003c71;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 4px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .legend-pin {
+            width: 18px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* ตกแต่ง Info Window (Popup) */
+        .popup-card {
+            width: 260px;
+            font-size: 0.88rem;
+            line-height: 1.4;
+        }
+        .popup-card h3 {
+            margin: 0 0 6px 0;
+            color: #003c71;
+            font-size: 1.05rem;
+        }
+        .popup-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            color: white;
+            font-size: 0.78rem;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .popup-img {
+            width: 100%;
+            height: 145px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            border: 1px solid #ddd;
+            background-color: #f1f5f9;
+            display: block;
+        }
+        .popup-card p {
+            margin: 4px 0;
+            color: #333;
+        }
+        .btn-more {
+            display: block;
+            text-align: center;
+            background-color: #0056b3;
+            color: white !important;
+            text-decoration: none;
+            padding: 7px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-top: 10px;
+            transition: background-color 0.2s;
+        }
+        .btn-more:hover {
+            background-color: #003c71;
+        }
+        .btn-more-disabled {
+            display: block;
+            text-align: center;
+            background-color: #94a3b8;
+            color: white !important;
+            text-decoration: none;
+            padding: 7px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-top: 10px;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- แถบด้านบนสำหรับเลือกไฟล์ geo_psu.geojson (คงไว้เป็นตัวเลือกเสริม) -->
+    <div id="topbar">
+        <h2>🗺️ แผนที่แสดงข้อมูลสถานที่ (geo_psu.geojson)</h2>
+        <div class="file-upload-box">
+            <label for="geojsonFile"><strong>เปลี่ยนไฟล์ GeoJSON:</strong></label>
+            <input type="file" id="geojsonFile" accept=".geojson,.json">
+        </div>
+    </div>
+
+    <!-- พื้นที่แสดงแผนที่ -->
+    <div id="map"></div>
+
+    <!-- โหลด Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // กำหนดชื่อไฟล์ GeoJSON เริ่มต้นที่ต้องการเรียกใช้งาน
+        const DEFAULT_GEOJSON_FILE = 'geo_psu.geojson';
+
+        // 1. กำหนดแผนที่ฐาน (Base Maps)
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        });
+
+        const openTopoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17,
+            attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
+        });
+
+        // สร้างแผนที่โดยตั้งค่าเริ่มต้นที่ OpenStreetMap
+        const map = L.map('map', {
+            center: [7.0086, 100.4981], // พิกัดเริ่มต้น (ม.อ. หาดใหญ่)
+            zoom: 15,
+            layers: [osm]
+        });
+
+        // เพิ่มตัวควบคุมสำหรับสลับแผนที่ฐาน (Layer Control)
+        const baseMaps = {
+            "OpenStreetMap": osm,
+            "OpenTopoMap": openTopoMap
+        };
+        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
+
+        // 2. กำหนดสีตามประเภทสถานที่ (type)
+        const typeColors = {
+            "สถานที่ราชการ": "#0056b3",      // สีน้ำเงิน
+            "แหล่งประวัติศาสตร์": "#d97706",  // สีส้ม/ทอง
+            "โบราณสถาน": "#dc2626",         // สีแดง
+            "ส่วนบุคคล": "#16a34a"           // สีเขียว
+        };
+        const defaultColor = "#64748b"; // สีเทา (กรณีไม่ตรงกับ 4 ประเภท)
+
+        function getColorByType(type) {
+            return typeColors[type] || defaultColor;
+        }
+
+        // ฟังก์ชันสร้าง SVG หมุดทรงหยดน้ำแบบ Google Maps
+        function createTeardropSVG(color, width = 30, height = 42) {
+            return `
+                <svg width="${width}" height="${height}" viewBox="0 0 24 34" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.45));">
+                    <path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 22 12 22s12-13 12-22c0-6.63-5.37-12-12-12z" fill="${color}" stroke="#ffffff" stroke-width="1.5"/>
+                    <circle cx="12" cy="11.5" r="4.5" fill="#ffffff"/>
+                </svg>
+            `;
+        }
+
+        // ฟังก์ชันสร้าง L.divIcon ทรงหยดน้ำสำหรับปักบนแผนที่
+        function createTeardropIcon(type) {
+            const color = getColorByType(type);
+            return L.divIcon({
+                className: 'custom-teardrop-marker',
+                html: createTeardropSVG(color, 30, 42),
+                iconSize: [30, 42],
+                iconAnchor: [15, 42],   // ปลายแหลมด้านล่างชี้ตรงพิกัด Lat/Lng พอดี
+                popupAnchor: [0, -40]   // ตำแหน่ง Info Window เปิดเหนือหัวหมุด
+            });
+        }
+
+        // 3. สร้างกล่องคำอธิบายสัญลักษณ์ (Legend) มุมขวาล่าง (ใช้ไอคอนหยดน้ำให้ตรงกับแผนที่)
+        const legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function() {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = '<h4>คำอธิบายสัญลักษณ์</h4>';
+            
+            for (const [typeName, color] of Object.entries(typeColors)) {
+                div.innerHTML += `
+                    <div class="legend-item">
+                        <span class="legend-pin">${createTeardropSVG(color, 16, 22)}</span>
+                        <span>${typeName}</span>
+                    </div>
+                `;
+            }
+            return div;
+        };
+        legend.addTo(map);
+
+        // Layer สำหรับเก็บข้อมูล GeoJSON ที่นำเข้า
+        let geojsonLayer = null;
+
+        // ฟังก์ชันจัดการ Path รูปภาพในโฟลเดอร์ images/ (รองรับทั้ง .jpg และ .png)
+        function buildImageTag(props, placeName) {
+            // ตรวจสอบชื่อคีย์ที่เป็นไปได้ใน properties (images, image, img, photo)
+            let rawImg = props.images || props.image || props.img || props.photo;
+            if (!rawImg) return '';
+
+            let filename = Array.isArray(rawImg) ? rawImg[0] : rawImg;
+            filename = String(filename).trim();
+            if (!filename) return '';
+
+            // ตัด ./ หรือ / ด้านหน้าออก แล้วเติม images/ หากยังไม่มี
+            filename = filename.replace(/^\.?\//, '');
+            if (!filename.startsWith('images/') && !filename.startsWith('http')) {
+                filename = 'images/' + filename;
+            }
+
+            // ตรวจสอบว่ามีนามสกุลไฟล์ (.jpg, .jpeg, .png, .webp) หรือไม่
+            const hasExtension = /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
+            const primarySrc = hasExtension ? filename : `${filename}.jpg`;
+
+            // สร้างฟังก์ชันสำรองกรณีโหลดภาพแรกไม่สำเร็จ ให้ลองสลับนามสกุล .png / .jpg อัตโนมัติ
+            const fallbackScript = `
+                if (!this.dataset.triedAlt) {
+                    this.dataset.triedAlt = 'true';
+                    if (this.src.match(/\\.jpg$/i)) {
+                        this.src = this.src.replace(/\\.jpg$/i, '.png');
+                    } else if (this.src.match(/\\.png$/i)) {
+                        this.src = this.src.replace(/\\.png$/i, '.jpg');
+                    } else {
+                        this.style.display = 'none';
+                    }
+                } else {
+                    this.style.display = 'none';
+                }
+            `.replace(/\s+/g, ' ').trim();
+
+            return `<img src="${primarySrc}" alt="${placeName}" class="popup-img" onerror="${fallbackScript}">`;
+        }
+
+        // ฟังก์ชันตรวจสอบและจัดรูปแบบลิงก์จาก properties.url
+        function buildDetailButton(props) {
+            let rawUrl = props.url || props.URL || props.link;
+            if (!rawUrl || String(rawUrl).trim() === '') {
+                return `<span class="btn-more-disabled">ไม่มีลิงก์รายละเอียด</span>`;
+            }
+
+            let cleanUrl = String(rawUrl).trim();
+            // กรณีกรอกเป็น www.domain.com หรือ domain.com โดยไม่มี http:// หรือ https:// ให้เติม https:// อัตโนมัติ
+            if (!/^https?:\/\//i.test(cleanUrl) && !cleanUrl.startsWith('/') && !cleanUrl.startsWith('./') && !cleanUrl.endsWith('.html')) {
+                cleanUrl = 'https://' + cleanUrl;
+            }
+
+            return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" class="btn-more">อ่านรายละเอียดเพิ่มเติม ➔</a>`;
+        }
+
+        // 4. โหลดไฟล์ geo_psu.geojson อัตโนมัติเมื่อเปิดหน้าเว็บ
+        function loadDefaultGeoJSON() {
+            fetch(DEFAULT_GEOJSON_FILE)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    renderGeoJSON(data);
+                })
+                .catch(err => {
+                    console.warn('ไม่สามารถโหลดไฟล์เริ่มต้นอัตโนมัติได้ (หากเปิดไฟล์แบบ file:/// กรุณารันผ่าน Local Server หรือเลือกไฟล์จากปุ่มด้านบน):', err);
+                });
+        }
+
+        // เรียกโหลดไฟล์เริ่มต้นทันที
+        loadDefaultGeoJSON();
+
+        // เหตุการณ์เมื่อผู้ใช้เลือกไฟล์จากปุ่มด้านบน (ยังคงไว้เผื่อเลือกไฟล์ใหม่)
+        document.getElementById('geojsonFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    renderGeoJSON(data);
+                } catch (err) {
+                    alert('ไม่สามารถอ่านไฟล์ได้ กรุณาตรวจสอบรูปแบบไฟล์ GeoJSON ให้ถูกต้อง');
+                    console.error(err);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // 5. ฟังก์ชันวาดจุดและ Info Window ลงบนแผนที่
+        function renderGeoJSON(data) {
+            // ลบ Layer เก่าออกก่อน (ถ้ามี)
+            if (geojsonLayer) {
+                map.removeLayer(geojsonLayer);
+            }
+
+            geojsonLayer = L.geoJSON(data, {
+                // สร้างสัญลักษณ์หมุดทรงหยดน้ำแยกสีตาม type
+                pointToLayer: function(feature, latlng) {
+                    const placeType = feature.properties?.type || '';
+                    return L.marker(latlng, {
+                        icon: createTeardropIcon(placeType)
+                    });
+                },
+                // กำหนด Info Window (Popup) และเหตุการณ์วางเมาส์
+                onEachFeature: function(feature, layer) {
+                    const props = feature.properties || {};
+                    const name = props.name || 'ไม่ระบุชื่อสถานที่';
+                    const type = props.type || 'ไม่ระบุประเภท';
+                    const history = props.history || '-';
+                    const department = props.department || '-';
+                    const details = props.details || '-';
+                    const badgeColor = getColorByType(type);
+
+                    // สร้างแท็กรูปภาพจากโฟลเดอร์ images/ (รองรับทั้ง .png และ .jpg)
+                    const imgHTML = buildImageTag(props, name);
+
+                    // สร้างปุ่มลิงก์จากค่า props.url โดยตรง
+                    const buttonHTML = buildDetailButton(props);
+
+                    const popupContent = `
+                        <div class="popup-card">
+                            ${imgHTML}
+                            <h3>${name}</h3>
+                            <span class="popup-badge" style="background-color: ${badgeColor};">${type}</span>
+                            <p><strong>หน่วยงาน:</strong> ${department}</p>
+                            <p><strong>ประวัติ:</strong> ${history}</p>
+                            <p><strong>รายละเอียด:</strong> ${details}</p>
+                            ${buttonHTML}
+                        </div>
+                    `;
+
+                    // ผูก Popup เข้ากับจุด
+                    layer.bindPopup(popupContent, { maxWidth: 280 });
+
+                    // แสดง Info Window ทันทีเมื่อนำเมาส์ไปวางบนจุด (Hover)
+                    layer.on('mouseover', function() {
+                        this.openPopup();
+                    });
+                }
+            }).addTo(map);
+
+            // ขยายแผนที่ให้ครอบคลุมจุดทั้งหมดในไฟล์โดยอัตโนมัติ
+            if (geojsonLayer.getBounds().isValid()) {
+                map.fitBounds(geojsonLayer.getBounds(), { padding: [50, 50] });
+            }
+        }
+    </script>
+</body>
+</html>

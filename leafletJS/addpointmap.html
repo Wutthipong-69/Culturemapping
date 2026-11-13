@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบบันทึกข้อมูลพิกัดสถานที่ (GeoJSON Exporter)</title>
+    
+    <!-- โหลด Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Sarabun', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        /* ส่วนของแบบฟอร์มด้านซ้าย */
+        #sidebar {
+            width: 390px;
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-right: 1px solid #dee2e6;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        h2 {
+            margin-top: 0;
+            color: #003c71; /* สีโทน ม.อ. */
+            font-size: 1.3rem;
+        }
+        .instruction {
+            background-color: #e2e8f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+            color: #334155;
+        }
+        .form-group {
+            margin-bottom: 12px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            color: #333;
+        }
+        input[type="text"], input[type="url"], textarea, select {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.95rem;
+            background-color: #fff;
+        }
+        input[readonly] {
+            background-color: #e9ecef;
+            color: #495057;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 65px;
+        }
+        .coord-group {
+            display: flex;
+            gap: 10px;
+        }
+        .coord-group .form-group {
+            flex: 1;
+        }
+        /* ส่วนจัดการอัปโหลดรูปภาพ */
+        .image-upload-wrapper {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .btn-upload-img {
+            background-color: #475569;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.88rem;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background-color 0.2s;
+        }
+        .btn-upload-img:hover {
+            background-color: #334155;
+        }
+        #imagePreviewBox {
+            margin-top: 8px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            background: #fff;
+            padding: 6px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+        }
+        #imagePreview {
+            width: 60px;
+            height: 45px;
+            object-fit: cover;
+            border-radius: 3px;
+        }
+        #uploadStatusText {
+            font-size: 0.8rem;
+            color: #0056b3;
+        }
+        .btn {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: background-color 0.2s;
+        }
+        .btn-save {
+            background-color: #0056b3;
+            color: white;
+        }
+        .btn-save:hover {
+            background-color: #004494;
+        }
+        .btn-export {
+            background-color: #28a745;
+            color: white;
+            margin-top: 12px;
+        }
+        .btn-export:hover {
+            background-color: #218838;
+        }
+        .btn-download-imgs {
+            background-color: #d97706;
+            color: white;
+            margin-top: 8px;
+            display: none; /* แสดงเมื่อมีรูปภาพที่เลือกไว้ */
+        }
+        .btn-download-imgs:hover {
+            background-color: #b45309;
+        }
+        .status-bar {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #dee2e6;
+            font-size: 0.9rem;
+            color: #555;
+        }
+        /* ส่วนของแผนที่ด้านขวา */
+        #map {
+            flex-grow: 1;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- แถบเครื่องมือและฟอร์มกรอกข้อมูล -->
+    <div id="sidebar">
+        <h2>บันทึกพิกัดสถานที่</h2>
+        <div class="instruction">
+            📍 <strong>วิธีใช้งาน:</strong> คลิกบนแผนที่เพื่อเลือกตำแหน่ง จากนั้นกรอกรายละเอียดและกด "เพิ่มจุดลงในรายการ"
+        </div>
+
+        <form id="locationForm">
+            <div class="coord-group">
+                <div class="form-group">
+                    <label for="lat">ละติจูด (Latitude)</label>
+                    <input type="text" id="lat" placeholder="คลิกบนแผนที่" readonly required>
+                </div>
+                <div class="form-group">
+                    <label for="lng">ลองจิจูด (Longitude)</label>
+                    <input type="text" id="lng" placeholder="คลิกบนแผนที่" readonly required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="placeName">ชื่อสถานที่ *</label>
+                <input type="text" id="placeName" placeholder="เช่น อาคารเรียนรวม" required>
+            </div>
+
+            <div class="form-group">
+                <label for="placeType">ประเภทสถานที่ *</label>
+                <select id="placeType" required>
+                    <option value="" disabled selected>-- เลือกประเภทสถานที่ --</option>
+                    <option value="สถานที่ราชการ">สถานที่ราชการ</option>
+                    <option value="แหล่งประวัติศาสตร์">แหล่งประวัติศาสตร์</option>
+                    <option value="โบราณสถาน">โบราณสถาน</option>
+                    <option value="ส่วนบุคคล">ส่วนบุคคล</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="history">ประวัติ</label>
+                <textarea id="history" placeholder="ระบุประวัติความเป็นมาของสถานที่..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="department">หน่วยงานรับผิดชอบ</label>
+                <input type="text" id="department" placeholder="เช่น สำนักวิทยบริการ">
+            </div>
+
+            <div class="form-group">
+                <label for="details">รายละเอียดอื่น ๆ</label>
+                <textarea id="details" placeholder="ข้อมูลเพิ่มเติม เวลาทำการ เบอร์ติดต่อ ฯลฯ"></textarea>
+            </div>
+
+            <!-- ส่วนเลือกรูปภาพและเก็บชื่อไฟล์ลงใน Text Box -->
+            <div class="form-group">
+                <label for="placeImages">รูปภาพสถานที่ (โฟลเดอร์ images)</label>
+                <div class="image-upload-wrapper">
+                    <input type="text" id="placeImages" placeholder="geo-ชื่อรูปภาพ (.jpg / .png)" readonly>
+                    <button type="button" class="btn-upload-img" id="selectImgBtn">🖼️ เลือกรูป</button>
+                    <input type="file" id="imageFileInput" accept="image/png, image/jpeg" style="display: none;">
+                </div>
+                <div id="imagePreviewBox">
+                    <img id="imagePreview" src="" alt="Preview">
+                    <span id="uploadStatusText">พร้อมบันทึก</span>
+                </div>
+            </div>
+
+            <!-- ช่องกรอก URL เว็บไซต์รายละเอียดเพิ่มเติม -->
+            <div class="form-group">
+                <label for="placeUrl">URL เว็บไซต์รายละเอียดเพิ่มเติม</label>
+                <input type="url" id="placeUrl" placeholder="เช่น https://www.psu.ac.th/place-detail">
+            </div>
+
+            <button type="submit" class="btn btn-save">➕ เพิ่มจุดลงในรายการ</button>
+        </form>
+
+        <div class="status-bar">
+            จำนวนจุดที่บันทึกไว้ทั้งหมด: <strong id="pointCount">0</strong> จุด
+            <button type="button" id="exportBtn" class="btn btn-export">💾 ส่งออกไฟล์ (geo_psu.geojson)</button>
+            <button type="button" id="downloadImagesBtn" class="btn btn-download-imgs">📥 บันทึกรูปภาพทั้งหมดลงโฟลเดอร์ images (<span id="imgCount">0</span>)</button>
+        </div>
+    </div>
+
+    <!-- พื้นที่แสดงแผนที่ -->
+    <div id="map"></div>
+
+    <!-- โหลด Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // 1. ตั้งค่าแผนที่เริ่มต้นที่พิกัด 6.870086, 101.244981 (ม.อ. วิทยาเขตปัตตานี)
+        const map = L.map('map').setView([6.870086, 101.244981], 16);
+
+        // เพิ่มชั้นข้อมูลแผนที่ฐานจาก OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // ตัวแปรสำหรับเก็บหมุดชั่วคราวขณะคลิกเลือก และ Layer สำหรับเก็บหมุดที่บันทึกแล้ว
+        let tempMarker = null;
+        const savedMarkersLayer = L.layerGroup().addTo(map);
+
+        // โครงสร้างข้อมูล GeoJSON FeatureCollection
+        let geojsonData = {
+            "type": "FeatureCollection",
+            "features": []
+        };
+
+        // เก็บรายการไฟล์รูปภาพที่ผู้ใช้เลือกไว้ในเซสชันนี้ (เก็บทั้ง object ไฟล์และชื่อใหม่ geo-...)
+        let uploadedFilesList = [];
+        let currentSelectedFile = null;
+
+        // 2. เหตุการณ์เมื่อคลิกบนแผนที่
+        map.on('click', function(e) {
+            const lat = e.latlng.lat.toFixed(6); // เก็บทศนิยม 6 ตำแหน่ง
+            const lng = e.latlng.lng.toFixed(6);
+
+            // นำค่าพิกัดไปใส่ในช่อง input
+            document.getElementById('lat').value = lat;
+            document.getElementById('lng').value = lng;
+
+            // ย้ายหรือสร้างหมุดชั่วคราวเพื่อให้รู้ว่ากำลังเลือกจุดไหนอยู่
+            if (tempMarker) {
+                tempMarker.setLatLng(e.latlng);
+            } else {
+                tempMarker = L.marker(e.latlng, { opacity: 0.7 }).addTo(map);
+            }
+            tempMarker.bindPopup("ตำแหน่งที่เลือก: " + lat + ", " + lng).openPopup();
+        });
+
+        // จัดการปุ่มเลือกรูปภาพ เปลี่ยนชื่อเป็น geo-ชื่อรูปภาพ และอัปโหลดไปยังโฟลเดอร์ images/
+        const selectImgBtn = document.getElementById('selectImgBtn');
+        const imageFileInput = document.getElementById('imageFileInput');
+        const placeImagesInput = document.getElementById('placeImages');
+        const imagePreviewBox = document.getElementById('imagePreviewBox');
+        const imagePreview = document.getElementById('imagePreview');
+        const uploadStatusText = document.getElementById('uploadStatusText');
+
+        selectImgBtn.addEventListener('click', function() {
+            imageFileInput.click();
+        });
+
+        imageFileInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // ตรวจสอบชนิดไฟล์ (อนุญาตเฉพาะ .png และ .jpg/.jpeg)
+            const validTypes = ['image/jpeg', 'image/png'];
+            if (!validTypes.includes(file.type)) {
+                alert('กรุณาเลือกไฟล์รูปภาพนามสกุล .jpg หรือ .png เท่านั้นครับ');
+                imageFileInput.value = '';
+                return;
+            }
+
+            // เปลี่ยนชื่อไฟล์โดยเติม "geo-" นำหน้า (ป้องกันการเติมซ้ำหากชื่อขึ้นต้นด้วย geo- อยู่แล้ว)
+            const newFileName = file.name.startsWith('geo-') ? file.name : `geo-${file.name}`;
+
+            // สร้าง File Object ใหม่ที่ใช้ชื่อ "geo-ชื่อรูปภาพ"
+            const renamedFile = new File([file], newFileName, {
+                type: file.type,
+                lastModified: file.lastModified
+            });
+
+            currentSelectedFile = renamedFile;
+
+            // นำชื่อไฟล์ใหม่ไปใส่ใน Text Box ทันที
+            placeImagesInput.value = newFileName;
+
+            // แสดงภาพตัวอย่าง (Preview)
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreview.src = e.target.result;
+                imagePreviewBox.style.display = 'flex';
+            };
+            reader.readAsDataURL(renamedFile);
+
+            // ส่งไฟล์ชื่อใหม่ไปอัปโหลดยัง Server (โฟลเดอร์ images/)
+            uploadImageToServer(renamedFile);
+        });
+
+        function uploadImageToServer(file) {
+            const formData = new FormData();
+            // ส่งไฟล์พร้อมชื่อใหม่ (geo-ชื่อรูปภาพ) ไปยัง upload.php
+            formData.append('imageFile', file, file.name);
+
+            uploadStatusText.textContent = `กำลังอัปโหลด ${file.name} ไปยัง images/...`;
+            uploadStatusText.style.color = '#d97706';
+
+            fetch('upload.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Server offline or no upload.php');
+                return response.json();
+            })
+            .then(result => {
+                if (result.success) {
+                    // อัปเดตชื่อไฟล์จริงที่บันทึกบน Server
+                    placeImagesInput.value = result.filename;
+                    uploadStatusText.textContent = `✅ บันทึก ${result.filename} ลงโฟลเดอร์ images/ สำเร็จ`;
+                    uploadStatusText.style.color = '#16a34a';
+                } else {
+                    throw new Error(result.message || 'Upload failed');
+                }
+            })
+            .catch(() => {
+                // กรณีใช้งานแบบ Offline (ไม่มี Server) ให้แจ้งสถานะพร้อมให้กดดาวน์โหลดรวมภายหลัง
+                uploadStatusText.textContent = `📌 เปลี่ยนชื่อเป็น ${file.name} แล้ว (โหมดออฟไลน์: กดปุ่มดาวน์โหลดรูปด้านล่างเพื่อย้ายลง images/)`;
+                uploadStatusText.style.color = '#0056b3';
+            });
+        }
+
+        // 3. เหตุการณ์เมื่อกดปุ่ม "เพิ่มจุดลงในรายการ"
+        document.getElementById('locationForm').addEventListener('submit', function(e) {
+            e.preventDefault(); // ป้องกันการรีเฟรชหน้าเว็บ
+
+            const lat = parseFloat(document.getElementById('lat').value);
+            const lng = parseFloat(document.getElementById('lng').value);
+
+            // ตรวจสอบว่าได้คลิกเลือกพิกัดหรือยัง
+            if (isNaN(lat) || isNaN(lng)) {
+                alert('กรุณาคลิกเลือกตำแหน่งบนแผนที่ก่อนครับ');
+                return;
+            }
+
+            const placeName = document.getElementById('placeName').value.trim();
+            const placeType = document.getElementById('placeType').value;
+            const history = document.getElementById('history').value.trim();
+            const department = document.getElementById('department').value.trim();
+            const details = document.getElementById('details').value.trim();
+            const placeImages = document.getElementById('placeImages').value.trim();
+            const placeUrl = document.getElementById('placeUrl').value.trim();
+
+            // เก็บไฟล์ภาพเข้าคิวสำหรับดาวน์โหลดสำรองในโหมดออฟไลน์
+            if (currentSelectedFile) {
+                uploadedFilesList.push(currentSelectedFile);
+                document.getElementById('imgCount').textContent = uploadedFilesList.length;
+                document.getElementById('downloadImagesBtn').style.display = 'block';
+            }
+
+            // สร้าง Object ตามมาตรฐาน GeoJSON Feature
+            // หมายเหตุ: มาตรฐาน GeoJSON จะเรียงลำดับพิกัดเป็น [Longitude, Latitude]
+            const feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [lng, lat]
+                },
+                "properties": {
+                    "name": placeName,
+                    "type": placeType,
+                    "history": history,
+                    "department": department,
+                    "details": details,
+                    "images": placeImages,
+                    "url": placeUrl
+                }
+            };
+
+            // เพิ่มข้อมูลเข้าสู่ Array ของ FeatureCollection
+            geojsonData.features.push(feature);
+
+            // สร้างลิงก์แสดงใน Popup หากมีการกรอก URL
+            const urlDisplay = placeUrl 
+                ? `<p style="margin: 3px 0; font-size: 0.85rem;"><strong>ลิงก์:</strong> <a href="${placeUrl}" target="_blank" rel="noopener noreferrer">เปิดเว็บไซต์ ↗</a></p>` 
+                : '';
+
+            // สร้างหมุดถาวรบนแผนที่พร้อม Popup แสดงรายละเอียด
+            const popupContent = `
+                <div style="min-width: 210px;">
+                    <h4 style="margin: 0 0 5px 0; color: #003c71;">${placeName}</h4>
+                    <p style="margin: 3px 0; font-size: 0.85rem;"><strong>ประเภท:</strong> ${placeType}</p>
+                    <p style="margin: 3px 0; font-size: 0.85rem;"><strong>หน่วยงาน:</strong> ${department || '-'}</p>
+                    <p style="margin: 3px 0; font-size: 0.85rem;"><strong>ประวัติ:</strong> ${history || '-'}</p>
+                    <p style="margin: 3px 0; font-size: 0.85rem;"><strong>รายละเอียด:</strong> ${details || '-'}</p>
+                    <p style="margin: 3px 0; font-size: 0.85rem;"><strong>รูปภาพ:</strong> ${placeImages || '-'}</p>
+                    ${urlDisplay}
+                </div>
+            `;
+            L.marker([lat, lng]).bindPopup(popupContent).addTo(savedMarkersLayer);
+
+            // ลบหมุดชั่วคราวออก
+            if (tempMarker) {
+                map.removeLayer(tempMarker);
+                tempMarker = null;
+            }
+
+            // อัปเดตตัวเลขจำนวนจุด และล้างค่าในฟอร์ม
+            document.getElementById('pointCount').textContent = geojsonData.features.length;
+            document.getElementById('locationForm').reset();
+            imagePreviewBox.style.display = 'none';
+            currentSelectedFile = null;
+        });
+
+        // 4. เหตุการณ์เมื่อกดปุ่ม "ส่งออกไฟล์ (geo_psu.geojson)"
+        document.getElementById('exportBtn').addEventListener('click', function() {
+            if (geojsonData.features.length === 0) {
+                alert('ยังไม่มีข้อมูลจุดที่บันทึกไว้ กรุณาเพิ่มข้อมูลอย่างน้อย 1 จุดก่อนส่งออกครับ');
+                return;
+            }
+
+            // แปลง Object เป็นข้อความ JSON (จัดย่อหน้า 2 spaces ให้อ่านง่าย)
+            const dataStr = JSON.stringify(geojsonData, null, 2);
+            
+            // สร้าง Blob และลิงก์ดาวน์โหลด
+            const blob = new Blob([dataStr], { type: 'application/geo+json;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute('href', url);
+            downloadAnchor.setAttribute('download', 'geo_psu.geojson');
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            
+            // ลบ Element และคืนหน่วยความจำ
+            document.body.removeChild(downloadAnchor);
+            URL.revokeObjectURL(url);
+        });
+
+        // 5. ปุ่มช่วยดาวน์โหลดรูปภาพทั้งหมด (สำหรับโหมดใช้งานในเครื่องที่ไม่มี Server)
+        document.getElementById('downloadImagesBtn').addEventListener('click', function() {
+            if (uploadedFilesList.length === 0) return;
+
+            uploadedFilesList.forEach((file, index) => {
+                setTimeout(() => {
+                    const url = URL.createObjectURL(file);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = file.name; // ดาวน์โหลดด้วยชื่อใหม่ "geo-ชื่อรูปภาพ"
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, index * 300); // หน่วงเวลาเล็กน้อยป้องกันเบราว์เซอร์บล็อกการดาวน์โหลดหลายไฟล์พร้อมกัน
+            });
+            alert('ระบบกำลังดาวน์โหลดรูปภาพทั้งหมด (ชื่อขึ้นต้นด้วย geo-) กรุณานำไฟล์ไปวางไว้ในโฟลเดอร์ images ของโปรเจกต์ครับ');
+        });
+    </script>
+</body>
+</html>
