@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflet Categorized Map - Pattani</title>
+
+    <!-- 1. Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        .control-panel {
+            margin-bottom: 15px;
+            background: #ffffff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        label {
+            font-weight: bold;
+            color: #333;
+        }
+        select {
+            padding: 8px 12px;
+            font-size: 14px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            outline: none;
+            cursor: pointer;
+            min-width: 300px;
+        }
+        #map {
+            width: 100%;
+            height: 700px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        /* Styling สำหรับคำอธิบายสัญลักษณ์ (Legend) */
+        .info.legend {
+            background: rgba(255, 255, 255, 0.92);
+            padding: 10px 14px;
+            font-size: 13px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            border-radius: 5px;
+            line-height: 20px;
+            color: #333;
+            max-height: 320px;
+            max-width: 280px; /* จำกัดความกว้างไม่ให้บังแผนที่มากเกินไปเมื่อข้อความภาษาไทยยาว */
+            overflow-y: auto;
+        }
+        .info.legend h4 {
+            margin: 0 0 8px;
+            font-size: 14px;
+            color: #111;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 4px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: flex-start; /* จัดชิดบนเผื่อกรณีข้อความภาษาไทยยาวเกิน 1 บรรทัด */
+            margin-bottom: 6px;
+        }
+        .legend-color {
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            margin-top: 1px;
+            opacity: 0.9;
+            border: 1px solid #666;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+
+        /* Styling สำหรับชื่อผู้จัดทำ */
+        .author-info {
+            background: rgba(255, 255, 255, 0.85);
+            padding: 6px 12px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #333;
+            border-radius: 4px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.2);
+        }
+
+        /* Styling สำหรับทิศเหนือ (North Arrow) */
+        .north-arrow {
+            background: rgba(255, 255, 255, 0.85);
+            padding: 5px;
+            border-radius: 50%;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.3);
+            text-align: center;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .north-arrow svg {
+            width: 28px;
+            height: 28px;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>แผนที่พื้นฐาน: จังหวัดปัตตานี</h2>
+
+    <div class="control-panel">
+        <label for="kmlSelect">เลือกรายการข้อมูล :</label>
+        <select id="kmlSelect">
+            <option value="">-- แสดงรายการชั้นข้อมูล --</option>
+            <option value="../tambol69.geojson">ขอบเขตการปกครองระดับตำบล</option>
+            <option value="../amphoe2.geojson">ขอบเขตการปกครองระดับอำเภอ2</option>
+            <option value="../jsonforest.geojson">1. พื้นที่ป่าไม้ในจังหวัดปัตตานี</option>
+            <option value="../riverjson.geojson">2. เส้นทางน้ำ</option>
+            <option value="../ruberjson.geojson">3. สวนยางพารา</option>
+        </select>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- 2. Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-kml/L.KML.js"></script>
+
+    <script>
+        const PATTANI_CENTER = [6.8671, 101.2501];
+        const map = L.map('map').setView(PATTANI_CENTER, 11);
+
+        // Basemap Layers
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const osmHOT = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors, HOT'
+        });
+
+        const openTopoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap'
+        });
+
+        // Layer Control สำหรับสลับแผนที่ฐาน
+        const baseLayers = {
+            'OpenStreetMap': osm,
+            'OpenStreetMap HOT': osmHOT,
+            'OpenTopoMap (ภูมิประเทศ)': openTopoMap
+        };
+        L.control.layers(baseLayers).addTo(map);
+
+        let baseKmlLayer = null;
+        let selectedLayer = null;
+        let legendControl = null;
+
+        // 1. เพิ่ม Scale Control (มาตราส่วนแผนที่)
+        L.control.scale({
+            imperial: false,
+            metric: true,
+            position: 'bottomleft'
+        }).addTo(map);
+
+        // 2. เพิ่ม ทิศเหนือ (North Arrow)
+        const northControl = L.control({ position: 'topright' });
+        northControl.onAdd = function() {
+            const div = L.DomUtil.create('div', 'north-arrow');
+            div.title = "ทิศเหนือ";
+            div.innerHTML = `
+                <svg viewBox="0 0 100 100">
+                    <polygon points="50,5 20,90 50,70" fill="#E74C3C" />
+                    <polygon points="50,5 80,90 50,70" fill="#BDC3C7" />
+                    <text x="50" y="30" font-weight="bold" font-size="22" fill="#FFFFFF" text-anchor="middle">N</text>
+                </svg>
+            `;
+            return div;
+        };
+        northControl.addTo(map);
+
+        // 3. เพิ่ม ชื่อผู้จัดทำ
+        const authorControl = L.control({ position: 'bottomright' });
+        authorControl.onAdd = function() {
+            const div = L.DomUtil.create('div', 'author-info');
+            div.innerHTML = 'จัดทำโดย: หลักสูตรสาขาวิชาภูมิศาสตร์ มอ.ปัตตานี';
+            return div;
+        };
+        authorControl.addTo(map);
+
+        // 4. กำหนดสีตามรหัสประเภทของ Feature (ยังคงใช้ LU_CODE เพื่อความแม่นยำของสี)
+        function getFeatureColor(type) {
+            switch (type) {
+                case '0': return '#C2EB7C';
+                case '1': return '#3C8F38';
+                case '2': return '#66F760';
+                case '3': return '#ff9900';
+                case '4': return '#2eb82e';
+                case '5': return '#ff9900';
+                case '6': return '#F0D597';
+                case '7': return '#e60000';
+                case '8': return '#DCED53';
+                case '9': return '#3C8F38';
+                case '10': return '#66F760';
+                case '11': return '#ff9900';
+                case '12': return '#2eb82e';
+                case 'F100': return '#3C8F38';
+                case 'F101': return '#66F760';
+                case 'F300': return '#ff9900';
+                case 'F301': return '#2eb82e';
+                case 'F400': return '#F8EBB4';
+                case 'F401': return '#C3F2B8';
+                case 'A100': return '#e60000';
+                case 'A302': return '#DCED53';
+                case '9401': return '#3C8F38';
+                case '9402': return '#66F760';
+                case '9403': return '#ff9900';
+                case '9404': return '#2eb82e';
+                case '9405': return '#E6AEB7';
+                case '9406': return '#F0D597';
+                case '9407': return '#F2D3AA';
+                case '9408': return '#DCED53';
+                case '9409': return '#B3C965';
+                case '9410': return '#E4C5F0';
+                case '9411': return '#e60000';
+                case '9412': return '#1313E8';
+                case '9499': return '#1313E8';
+                case 'AA': return '#1313E8';
+                case 'แหล่งน้ำ': return '#3399ff';
+                default: return '#aaaaaa';
+            }
+        }
+
+        // 5. ฟังก์ชันกำหนด Style ให้กับแต่ละ Feature
+        function styleFeature(feature) {
+            const category = feature.properties 
+                ? (feature.properties.LU_CODE || feature.properties.Ltype || feature.properties.HY_LNAME) 
+                : '';
+            
+            return {
+                fillColor: getFeatureColor(String(category)),
+                weight: 0.25,
+                opacity: 1,
+                color: '#131314',
+                fillOpacity: 0.95
+            };
+        }
+
+        // 6. [ปรับปรุงใหม่] ฟังก์ชันสร้างคำอธิบายสัญลักษณ์จาก Map (LU_CODE => LU_DES_TH)
+        function updateLegend(legendMap) {
+            if (legendControl) {
+                map.removeControl(legendControl);
+                legendControl = null;
+            }
+
+            if (!legendMap || legendMap.size === 0) return;
+
+            legendControl = L.control({ position: 'bottomleft' });
+
+            legendControl.onAdd = function() {
+                const div = L.DomUtil.create('div', 'info legend');
+                div.innerHTML = '<h4>คำอธิบายสัญลักษณ์</h4>';
+
+                // แปลง Map เป็น Array และเรียงลำดับตามรหัส (LU_CODE)
+                const sortedEntries = Array.from(legendMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+                sortedEntries.forEach(([code, description]) => {
+                    const color = getFeatureColor(code);
+                    div.innerHTML += `
+                        <div class="legend-item">
+                            <span class="legend-color" style="background:${color}"></span>
+                            <span>${description}</span>
+                        </div>
+                    `;
+                });
+
+                return div;
+            };
+
+            legendControl.addTo(map);
+        }
+
+        // 7. โหลดไฟล์หลัก provincepn.kml
+        fetch('provincepn.kml')
+            .then(res => res.text())
+            .then(kmlText => {
+                const kmlDom = new DOMParser().parseFromString(kmlText, 'text/xml');
+                baseKmlLayer = new L.KML(kmlDom);
+                
+                baseKmlLayer.eachLayer(layer => {
+                    if (layer.setStyle) {
+                        layer.setStyle({ fill: false, fillOpacity: 0, weight: 2, color: '#000000' });
+                    }
+                });
+
+                map.addLayer(baseKmlLayer);
+                if (baseKmlLayer.getBounds().isValid()) {
+                    map.fitBounds(baseKmlLayer.getBounds());
+                }
+            });
+
+        // 8. [ปรับปรุงใหม่] ฟังก์ชันโหลดไฟล์เสริม และจับคู่ LU_CODE กับ LU_DES_TH
+        function loadOverlayFile(filePath) {
+            if (selectedLayer) {
+                map.removeLayer(selectedLayer);
+                selectedLayer = null;
+            }
+
+            if (legendControl) {
+                map.removeControl(legendControl);
+                legendControl = null;
+            }
+
+            if (!filePath) return;
+
+            fetch(filePath)
+                .then(res => {
+                    if (!res.ok) throw new Error('ไม่พบไฟล์');
+                    return filePath.endsWith('.json') || filePath.endsWith('.geojson') ? res.json() : res.text();
+                })
+                .then(data => {
+                    if (typeof data === 'object') {
+                        // ใช้ Map เพื่อเก็บคู่ข้อมูล [รหัส LU_CODE, คำอธิบาย LU_DES_TH] แบบไม่ซ้ำกัน
+                        const legendItemsMap = new Map();
+
+                        selectedLayer = L.geoJSON(data, {
+                            style: styleFeature,
+                            onEachFeature: function (feature, layer) {
+                                if (feature.properties) {
+                                    const props = feature.properties;
+                                    // ดึงรหัสเพื่อใช้เทียบสี
+                                    const code = props.LU_CODE || props.Ltype || props.HY_LNAME;
+                                    
+                                    if (code !== undefined && code !== null && code !== '') {
+                                        const codeStr = String(code);
+                                        // ดึงค่าจาก LU_DES_TH มาเป็นคำอธิบาย (หากไม่มีฟิลด์นี้ ให้ใช้ค่า code เดิมแสดงแทน)
+                                        const descText = props.LU_DES_TH ? String(props.LU_DES_TH).trim() : codeStr;
+                                        
+                                        if (!legendItemsMap.has(codeStr)) {
+                                            legendItemsMap.set(codeStr, descText);
+                                        }
+                                    }
+
+                                    // สร้าง Popup แสดงรายละเอียดเมื่อคลิก
+                                    let popupContent = '<b>รายละเอียด:</b><br>';
+                                    for (let key in props) {
+                                        popupContent += `<b>${key}:</b> ${props[key]}<br>`;
+                                    }
+                                    layer.bindPopup(popupContent);
+                                }
+                            }
+                        });
+
+                        // ส่งข้อมูล Map ไปสร้าง Legend
+                        updateLegend(legendItemsMap);
+                    } else {
+                        // กรณีเป็น KML
+                        const kmlDom = new DOMParser().parseFromString(data, 'text/xml');
+                        selectedLayer = new L.KML(kmlDom);
+                    }
+
+                    map.addLayer(selectedLayer);
+
+                    const bounds = selectedLayer.getBounds();
+                    if (bounds.isValid()) {
+                        if (baseKmlLayer && baseKmlLayer.getBounds().isValid()) {
+                            map.fitBounds(baseKmlLayer.getBounds().extend(bounds));
+                        } else {
+                            map.fitBounds(bounds);
+                        }
+                    }
+                })
+                .catch(err => alert('เกิดข้อผิดพลาดในการโหลดไฟล์: ' + err.message));
+        }
+
+        document.getElementById('kmlSelect').addEventListener('change', e => {
+            loadOverlayFile(e.target.value);
+        });
+    </script>
+</body>
+</html>
